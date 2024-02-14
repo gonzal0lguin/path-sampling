@@ -1,14 +1,7 @@
 <launch>
 
-  <arg name="map_name" default="mapa_facil"/>
-
-  <!-- <node name="map_server" pkg="map_server" type="map_server" args="$(find move_base_navigation_common)/maps/maps/$(arg map_name)/$(arg map_name).yaml">
-    <param name="frame_id" value="map"/>
-  </node> -->
-
   <node pkg="navfn" type="navfn_node" name="navfn" respawn="false" output="screen">
-    <rosparam file="$(find move_base_navigation_common)/navigation/configuration/navfn_only_default_params.yaml" command="load" ns="costmap"/>
-    <remap from="/map" to="/map_w_barrier" />
+    <rosparam file="$(find path_sampling)/config/navfn_params.yaml" command="load" ns="costmap"/>
     <remap from="/navfn/goal" to="/move_base_simple/goal"/>
     <remap from="/navfn/navfn_planner/plan" to="/global_planner/plan"/>
   </node>

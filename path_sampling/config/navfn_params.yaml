@@ -1,0 +1,14 @@
+# This new footprint considers inflation due to drifting
+footprint: [[-0.1, -0.1], [-0.1, 0.1], [0.1, 0.1], [0.1, -0.1]]
+
+# Cost map parameters #
+static_map: true
+
+# Coordinate frame parameters
+global_frame: "map"
+robot_base_frame: "base_link"
+
+# Rate parameters
+update_frequency: 5.0
+
+inflation_radius: 0.60
