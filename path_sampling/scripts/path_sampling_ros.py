@@ -1,17 +1,19 @@
 import rospy
 from nav_msgs.msg import Path, Odometry
 from navfn.srv import MakeNavPlan
+from std_msgs.msg import Header
 import tf
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
-from geometry_msgs.msg import Pose2D, PoseStamped, Vector3
+from geometry_msgs.msg import Pose2D, PoseStamped, Vector3, Quaternion
 from visualization_msgs.msg import Marker, MarkerArray
+from path_sampling import PathSampler
 
 import numpy as np
 
 
-
 class PathSamplerROS():
-    def __init__(self, name="ExecuteGlobalPlan"):
+    def __init__(self, name="PathSampler"):
+        self.name = name
 
         print(f"[{self.name}] Iniciating node")
 
@@ -23,53 +25,28 @@ class PathSamplerROS():
         self._mka_pub  = rospy.Publisher("/path_sampler/waypoints_vis", MarkerArray, queue_size=2)
         self._wp_pub   = rospy.Publisher("/path_sampler/waypoints", Path, queue_size=10)
 
+        self.sub = rospy.Subscriber("/move_base_simple/goal", PoseStamped, self.cb)
+
         self._listener = tf.TransformListener()
 
+        self.setup()
+
+        self._sampler = PathSampler(waypoint_dst=self._waypoint_dst)
 
     def setup(self):
 
         self._plan_srv = rospy.ServiceProxy("/navfn/make_plan", MakeNavPlan)
         self._plan_srv.wait_for_service()
         print(f"[{self.name}] Global planner server is ready!")
-        
-    def initialise(self):
 
-        self.goal_pub = rospy.Publisher("coverage_navigation/current_goal", PoseStamped, queue_size=10)
-        self.setup()
-        
-    # def execute_plan(self, start_pose):
-        
-    #     start_pose_stamped = self.build_pose_stamped(start_pose)
-    #     plan = self.get_waypoints(start_pose_stamped)
-
-    #     if plan is not None:
-    #         print(f"[{self.name}] Got plan with {len(plan)} points")
-    #         for i in range(len(plan)):
-
-    #             goal_0 = plan[i]
-    #             self.goal_pub.publish(goal_0)
-
-    #             goal = RLControllerGoal()
-
-    #             goal.navigation_target.pose.position.x = goal_0.pose.position.x
-    #             goal.navigation_target.pose.position.y = goal_0.pose.position.y
-                
-    #             self.rl_client.send_goal(goal)
-    #             print(f"sending goal {i} to planner server")
-
-    #             self.rl_client.wait_for_result()
-    #             print("got result!")
-    #             i += 1
-
-    #         print(f"[{self.name}] Path had been executed succesfully!")
-    #     else:
-    #         print(f"[{self.name}] Could not find global path!!")
+    def cb(self, target):
+        self.get_waypoints(target)
 
     def get_waypoints(self, target):
         start = self.get_robot_pose()
         try:
             plan = self._plan_srv(start, target)
-            wps = self.sample_plan_uniform(plan.path)
+            wps = self._sampler.sample_plan_uniform(self.path_to_numpy(plan.path))
 
             if self._visualize_wp:
                 self.visualize_waypoints(wps)
@@ -80,34 +57,10 @@ class PathSamplerROS():
             print("Service call failed: %s"%e)
         
         except:
-            print(f"[self.name] No path found")
+            print(f"{[self.name]} No path found")
 
         return None
     
-    def sample_plan_uniform(self, path):
-        L = 0
-        waypoints = []
-        for i in range(1, len(path)):
-            segment_l = self.calculate_segment_lenght(
-                [path[i-1].pose.position.x, path[i-1].pose.position.y],
-                [path[i].pose.position.x, path[i].pose.position.y]
-            ) 
-            L += segment_l
-            
-            if L >= self._waypoint_dst:
-                waypoints.append(path[i])
-                L -= self._waypoint_dst
-
-        if L < self._waypoint_dst and len(waypoints)>0:
-            waypoints.pop()
-        waypoints.append(path[-1])
-
-        return waypoints
-
-    def sample_plan_curvature(self, path):
-        pass
-
-
     def get_robot_pose(self):
         try:
             (pos, rot) = self._listener.lookupTransform(self._map_frame, self._base_frame, rospy.Time(0))
@@ -144,20 +97,34 @@ class PathSamplerROS():
         pose.pose.orientation.w = quaternion[3]
 
         return pose
-        
+    
+    
     @staticmethod
-    def calculate_segment_lenght(s1, s2):
-        x1, y1 = s1
-        x2, y2 = s2
-        return np.sqrt( (x1 - x2)**2 + (y1 - y2)**2 )
+    def get_yaw(q: Quaternion):
+        q_l = [q.x, q.y, q.z, q.w]
+        _, _, yaw = euler_from_quaternion(q_l)
+
+        return yaw
+
+    def path_to_numpy(self, path: Path):
+        pt_ = []
+        for i in range(len(path)):
+            pt_.append([path[i].pose.position.x, 
+                       path[i].pose.position.y, 
+                       self.get_yaw(path[i].pose.orientation)])            
+
+        return np.asarray(pt_)
 
     def visualize_waypoints(self, points, color=[1, 1, 0, 0]):
         marker_array = MarkerArray()
 
         index = 0
         for wp in points:
-            marker = Marker(header = wp.header,
-                            ns = "waypoints_osm",
+            header = Header()
+            header.frame_id = self._map_frame
+            header.stamp = rospy.Time.now()
+            marker = Marker(header = header,
+                            ns = "waypoints",
                             id = index,
                             type = Marker.SPHERE,
                             action = Marker.ADD,
@@ -170,7 +137,7 @@ class PathSamplerROS():
             marker.color.b = color[3]
 
             index += 1
-            marker.pose = wp.pose
+            marker.pose = self.build_pose_stamped(Pose2D(*wp)).pose
             marker_array.markers.append(marker)
 
         self._mka_pub.publish(marker_array)
