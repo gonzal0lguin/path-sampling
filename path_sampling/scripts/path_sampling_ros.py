@@ -40,24 +40,30 @@ class PathSamplerROS():
         print(f"[{self.name}] Global planner server is ready!")
 
     def cb(self, target):
-        self.get_waypoints(target)
+        self.get_waypoints(target, method='cv')
 
-    def get_waypoints(self, target):
+    def get_waypoints(self, target, method='u'):
         start = self.get_robot_pose()
-        try:
-            plan = self._plan_srv(start, target)
+        # try:
+        plan = self._plan_srv(start, target)
+
+        if method == 'u':
             wps = self._sampler.sample_plan_uniform(self.path_to_numpy(plan.path))
 
-            if self._visualize_wp:
-                self.visualize_waypoints(wps)
+        elif method == 'cv':
+            wps = self._sampler.sample_curve_from_gradient(self.path_to_numpy(plan.path))
             
-            return wps
+
+        if self._visualize_wp:
+            self.visualize_waypoints(wps)
         
-        except rospy.ServiceException as e:
-            print("Service call failed: %s"%e)
+        return wps
         
-        except:
-            print(f"{[self.name]} No path found")
+        # except rospy.ServiceException as e:
+        #     print("Service call failed: %s"%e)
+        
+        # except:
+        #     print(f"{[self.name]} No path found")
 
         return None
     
@@ -129,7 +135,7 @@ class PathSamplerROS():
                             type = Marker.SPHERE,
                             action = Marker.ADD,
                             scale = Vector3(x=.1, y=.1, z=0.01),
-                            lifetime = rospy.Duration(30))
+                            lifetime = rospy.Duration(5))
             
             marker.color.a = color[0]
             marker.color.r = color[1]
